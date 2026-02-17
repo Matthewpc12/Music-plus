@@ -1,21 +1,23 @@
-// vite.config.ts
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  base: '/Music-plus/', // Add this line!
+  // 1. Remove the username. Just the repo name with slashes.
+  base: '/Music-plus/', 
+
   plugins: [react()],
+  
   build: {
-    // 1. TOP LEVEL of build (Correct spot)
-    cssCodeSplit: false, 
+    cssCodeSplit: false,
     minify: false,
-    
     rollupOptions: {
-      // 2. treeshake goes HERE
-      treeshake: false, 
+      // 2. treeshake should be an object or boolean
+      treeshake: false,
+      
+      // 3. output MUST be an object { }, not the number 1
       output: {
         inlineDynamicImports: true,
       }
     }
   }
-})
+});
