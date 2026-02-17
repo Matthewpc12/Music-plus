@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Music</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #000;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            color: white;
+        }
+        
+        .app-content { height: 100dvh; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 160px; }
+        ::-webkit-scrollbar { width: 0px; }
+        
+        @keyframes music-bar { 0%, 100% { height: 4px; } 50% { height: 20px; } }
+        .active-scale:active { transform: scale(0.96); }
+        .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        
+        input[type=range] { -webkit-appearance: none; background: transparent; }
+        input[type=range]::-webkit-slider-thumb { 
+            -webkit-appearance: none; height: 14px; width: 14px; border-radius: 50%; 
+            background: #ffffff; cursor: pointer; margin-top: -5px; border: none; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+        input[type=range]::-webkit-slider-runnable-track { 
+            width: 100%; height: 4px; cursor: pointer; background: rgba(255,255,255,0.1); border-radius: 2px; 
+        }
+
+        .mask-linear { mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent); }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+
+        @keyframes ping-once {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            50% { opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+        }
+        .animate-ping-once { animation: ping-once 0.8s ease-out forwards; }
+    </style>
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@19.0.0",
+    "react-dom": "https://esm.sh/react-dom@19.0.0",
+    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+    "lucide-react": "https://esm.sh/lucide-react@0.460.0",
+    "idb-keyval": "https://esm.sh/idb-keyval@6",
+    "htm": "https://esm.sh/htm@3.1.1",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="module">
+        import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import htm from 'htm';
+        import { 
+            Play, Pause, SkipForward, SkipBack, Search, Disc, Maximize2, Sliders, Tv, Clock, Mic, 
+            SquareStack, FileMusic, Zap, Loader2, RefreshCw, ChevronDown, MoreHorizontal, Shuffle, 
+            Repeat, Music, Layers, Volume2, VolumeX, List, AlertCircle, Link2, Settings, CheckCircle2, 
+            Database, HardDrive, Info, Upload, ChevronLeft, Plus, X, Home, Trash2, User, Library, 
+            Download, FileJson, LayoutGrid, Compass, Headphones, Star, Globe, History, Heart, Shield, 
+            Bell, ChevronRight, Monitor, Dices, ArrowUp, ArrowDown, Lock, Unlock, Save, Gamepad2, 
+            Sparkles, Mic2, Signal, Music2, MessageSquareQuote, FileText, Youtube, Image as ImageIcon, 
+            Palette, Edit, Camera, ExternalLink, Trophy, RotateCcw, Skull, Flame
+        } from 'lucide-react';
+        import { get, set as idbSet } from 'idb-keyval';
+
+        const html = htm.bind(React.createElement);
+
+        // --- CONSTANTS ---
+        const API_BASE_URL = "https://compared-achievements-plans-subaru.trycloudflare.com";
+        const CACHE_KEY_METADATA = "apple_clone_metadata_v1";
+        const CACHE_KEY_PLAYLISTS = "apple_clone_playlists_v1";
+        const CACHE_KEY_COVERS = "apple_clone_covers_v1";
+        const DEFAULT_COVER = "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=1000&auto=format&fit=crop";
+        const SILENT_MP3 = "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjIzLjEwMgAAAAAAAAAAAAAA//+EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//+EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//+EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+        // --- GLOBAL AUDIO STATE ---
+        const mainAudio = new Audio();
+        const heartbeatAudio = new Audio();
+        [mainAudio, heartbeatAudio].forEach(el => {
+            el.setAttribute('playsinline', 'true');
+            el.setAttribute('webkit-playsinline', 'true');
+            el.preload = 'auto';
+            el.crossOrigin = 'anonymous';
+        });
+        heartbeatAudio.src = SILENT_MP3;
+        heartbeatAudio.loop = true;
+        heartbeatAudio.volume = 0.01;
+
+        let audioContext = null;
+        let analyserNode = null;
+        let eqBands = {};
+
+        // --- HELPERS ---
+        const formatTime = (time) => {
+            if (!Number.isFinite(time)) return "0:00";
+            const min = Math.floor(time / 60);
+            const sec = Math.floor(time % 60);
+            return `${min}:${sec.toString().padStart(2, '0')}`;
+        };
+
+        const setCookie = (name, value, days) => {
+            const date = new Date();
+            date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+            document.cookie = `${name}=${value};expires=${date.toUTCString()};path=/`;
+        };
+
+        const getCookie = (name) => {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop()?.split(';').shift();
+            return undefined;
+        };
+
+        // --- COMPONENTS ---
+
+        const Visualizer = ({ analyser, coverUrl, className, style = 'normal', customConfig }) => {
+            const canvasRef = useRef(null);
+            const animationRef = useRef(0);
+            const [colors, setColors] = useState({ bg: [10, 10, 10], accent: [250, 45, 72] });
+            const dropsRef = useRef([]);
+
+            useEffect(() => {
+                if (!coverUrl) return;
+                const img = new Image();
+                img.crossOrigin = "Anonymous";
+                img.src = coverUrl;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 1; canvas.height = 1;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(img, 0, 0, 1, 1);
+                        const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+                        setColors({ bg: [r, g, b], accent: [r, g, b] });
+                    }
+                };
+            }, [coverUrl]);
+
+            useEffect(() => {
+                if (!analyser || !canvasRef.current || style === 'none') return;
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                const dpr = window.devicePixelRatio || 1;
+                const rect = canvas.getBoundingClientRect();
+                canvas.width = rect.width * dpr; canvas.height = rect.height * dpr;
+                ctx.scale(dpr, dpr);
+
+                if (style === 'matrix' && dropsRef.current.length === 0) {
+                    dropsRef.current = new Array(Math.ceil(rect.width / 20)).fill(0).map(() => Math.random() * rect.height);
+                }
+
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                const [ar, ag, ab] = colors.accent;
+
+                const draw = () => {
+                    animationRef.current = requestAnimationFrame(draw);
+                    const w = rect.width; const h = rect.height;
+                    analyser.getByteFrequencyData(dataArray);
+
+                    if (style === 'matrix') {
+                        ctx.fillStyle = 'rgba(0,0,0,0.1)'; ctx.fillRect(0,0,w,h);
+                        ctx.fillStyle = `rgb(${ar},${ag},${ab})`; ctx.font = '15px monospace';
+                        dropsRef.current.forEach((d, i) => {
+                            ctx.fillText(String.fromCharCode(0x30A0 + Math.random() * 96), i * 20, d);
+                            if (d > h && Math.random() > 0.975) dropsRef.current[i] = 0; else dropsRef.current[i] += 20;
+                        });
+                        return;
+                    }
+
+                    ctx.clearRect(0, 0, w, h);
+                    const volume = dataArray[2] / 255;
+                    const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w * 0.9 * (1 + volume));
+                    grad.addColorStop(0, `rgba(${ar},${ag},${ab},0.4)`); grad.addColorStop(1, 'rgba(0,0,0,0)');
+                    ctx.fillStyle = grad; ctx.fillRect(0,0,w,h);
+
+                    const bars = 64; const barW = (w / bars);
+                    for(let i=0; i<bars; i++) {
+                        const val = dataArray[i * 2]; const bh = (val / 255) * h * 0.4;
+                        ctx.fillStyle = `rgba(${ar},${ag},${ab},0.5)`;
+                        ctx.fillRect(i * barW, h - bh, barW - 2, bh);
+                    }
+                };
+                draw();
+                return () => cancelAnimationFrame(animationRef.current);
+            }, [analyser, style, colors]);
+
+            return html`<canvas ref=${canvasRef} className=${className} style=${{ width: '100%', height: '100%' }} />`;
+        };
+
+        const Equalizer = ({ settings, onChange, onClose }) => {
+            const bands = ['bass', 'mids', 'treble'];
+            return html`
+                <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick=${onClose}>
+                    <div className="bg-zinc-900/95 border border-white/20 p-8 rounded-3xl w-80 shadow-2xl" onClick=${e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-8">
+                            <h3 className="text-xl font-bold">Equalizer</h3>
+                            <button onClick=${onClose} className="text-[#fa2d48] font-bold">Done</button>
+                        </div>
+                        <div className="space-y-8">
+                            ${bands.map(band => html`
+                                <div key=${band} className="space-y-2">
+                                    <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                                        <span>${band}</span><span>${settings[band]} dB</span>
+                                    </div>
+                                    <input type="range" min="-12" max="12" value=${settings[band]} onChange=${e => onChange({...settings, [band]: parseInt(e.target.value)})} className="w-full accent-[#fa2d48]" />
+                                </div>
+                            `)}
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        // --- MAIN APPLICATION ---
+        function App() {
+            const [tracks, setTracks] = useState([]);
+            const [view, setView] = useState('library');
+            const [currentTrack, setCurrentTrack] = useState(null);
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [currentTime, setCurrentTime] = useState(0);
+            const [duration, setDuration] = useState(0);
+            const [volume, setVolume] = useState(0.8);
+            const [fullScreenPlayer, setFullScreenPlayer] = useState(false);
+            const [isLoading, setIsLoading] = useState(true);
+            const [isAppLocked, setIsAppLocked] = useState(true);
+            const [visualizerStyle, setVisualizerStyle] = useState('normal');
+            const [eqSettings, setEqSettings] = useState({ bass: 0, mids: 0, treble: 0 });
+            const [isEqOpen, setIsEqOpen] = useState(false);
+            const [isAuthorized, setIsAuthorized] = useState(false);
+            const [uploadQueue, setUploadQueue] = useState([]);
+            const [searchQuery, setSearchQuery] = useState("");
+
+            const initAudio = useCallback(() => {
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    analyserNode = audioContext.createAnalyser();
+                    analyserNode.fftSize = 256;
+                    const source = audioContext.createMediaElementSource(mainAudio);
+                    
+                    const bass = audioContext.createBiquadFilter(); bass.type = 'lowshelf'; bass.frequency.value = 200;
+                    const mids = audioContext.createBiquadFilter(); mids.type = 'peaking'; mids.frequency.value = 1000;
+                    const treble = audioContext.createBiquadFilter(); treble.type = 'highshelf'; treble.frequency.value = 3000;
+                    eqBands = { bass, mids, treble };
+
+                    source.connect(bass); bass.connect(mids); mids.connect(treble);
+                    treble.connect(analyserNode); analyserNode.connect(audioContext.destination);
+                }
+                if (audioContext.state === 'suspended') audioContext.resume();
+            }, []);
+
+            const playTrack = useCallback((track) => {
+                initAudio();
+                if (currentTrack?.id !== track.id) {
+                    setCurrentTrack(track);
+                    mainAudio.src = track.url;
+                    mainAudio.load();
+                }
+                mainAudio.play().then(() => {
+                    setIsPlaying(true);
+                    heartbeatAudio.play().catch(() => {});
+                });
+            }, [currentTrack, initAudio]);
+
+            const togglePlayPause = () => {
+                initAudio();
+                if (mainAudio.paused) { mainAudio.play(); setIsPlaying(true); }
+                else { mainAudio.pause(); setIsPlaying(false); }
+            };
+
+            const playNext = useCallback(() => {
+                const idx = tracks.findIndex(t => t.id === currentTrack?.id);
+                if (idx !== -1) playTrack(tracks[(idx + 1) % tracks.length]);
+            }, [tracks, currentTrack, playTrack]);
+
+            const playPrev = useCallback(() => {
+                if (mainAudio.currentTime > 3) { mainAudio.currentTime = 0; return; }
+                const idx = tracks.findIndex(t => t.id === currentTrack?.id);
+                if (idx !== -1) playTrack(tracks[(idx - 1 + tracks.length) % tracks.length]);
+            }, [tracks, currentTrack, playTrack]);
+
+            const handleUpload = async (e) => {
+                const files = e.target.files;
+                if (!files.length) return;
+                
+                for (const file of files) {
+                    const id = Math.random().toString(36).substr(2, 9);
+                    const newUpload = { id, filename: file.name, progress: 0, status: 'uploading' };
+                    setUploadQueue(prev => [...prev, newUpload]);
+
+                    const xhr = new XMLHttpRequest();
+                    const formData = new FormData();
+                    formData.append("file", file);
+
+                    xhr.upload.addEventListener("progress", (evt) => {
+                        if (evt.lengthComputable) {
+                            const percent = (evt.loaded / evt.total) * 100;
+                            setUploadQueue(prev => prev.map(u => u.id === id ? {...u, progress: percent} : u));
+                        }
+                    });
+
+                    xhr.addEventListener("load", () => {
+                        setUploadQueue(prev => prev.filter(u => u.id !== id));
+                        loadLibrary();
+                    });
+
+                    xhr.open("POST", `${API_BASE_URL}/upload`);
+                    xhr.send(formData);
+                }
+            };
+
+            const loadLibrary = async () => {
+                setIsLoading(true);
+                try {
+                    const res = await fetch(`${API_BASE_URL}/api/all-metadata`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        const processed = data.map(t => ({
+                            id: t.filename,
+                            filename: t.filename,
+                            url: `${API_BASE_URL}/music/${encodeURIComponent(t.filename)}`,
+                            title: t.title || t.filename,
+                            artist: t.artist || "Unknown Artist",
+                            album: t.album || "Unknown Album",
+                            coverUrl: DEFAULT_COVER
+                        }));
+                        setTracks(processed);
+                        await idbSet(CACHE_KEY_METADATA, processed);
+                    }
+                } catch (e) {
+                    const cached = await get(CACHE_KEY_METADATA);
+                    if (cached) setTracks(cached);
+                }
+                setIsLoading(false);
+                if (getCookie('app_unlocked') === 'true') setIsAppLocked(false);
+            };
+
+            useEffect(() => {
+                const onTime = () => setCurrentTime(mainAudio.currentTime);
+                const onMeta = () => setDuration(mainAudio.duration);
+                const onEnd = () => playNext();
+                mainAudio.addEventListener('timeupdate', onTime);
+                mainAudio.addEventListener('loadedmetadata', onMeta);
+                mainAudio.addEventListener('ended', onEnd);
+                return () => {
+                    mainAudio.removeEventListener('timeupdate', onTime);
+                    mainAudio.removeEventListener('loadedmetadata', onMeta);
+                    mainAudio.removeEventListener('ended', onEnd);
+                };
+            }, [playNext]);
+
+            useEffect(() => {
+                if (eqBands.bass) eqBands.bass.gain.value = eqSettings.bass;
+                if (eqBands.mids) eqBands.mids.gain.value = eqSettings.mids;
+                if (eqBands.treble) eqBands.treble.gain.value = eqSettings.treble;
+            }, [eqSettings]);
+
+            useEffect(() => { loadLibrary(); }, []);
+
+            if (isAppLocked) {
+                return html`
+                    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center p-6 text-center">
+                        <div className="w-24 h-24 bg-[#fa2d48] rounded-3xl flex items-center justify-center mb-10 shadow-2xl">
+                            <${Headphones} className="w-12 h-12" />
+                        </div>
+                        <h1 className="text-4xl font-black mb-2 tracking-tighter">Music Library</h1>
+                        <p className="text-zinc-500 mb-8 font-medium">Enter your access code to begin</p>
+                        <input 
+                            type="password" placeholder="••••" 
+                            className="bg-white/5 border border-white/10 rounded-2xl p-6 text-center text-3xl tracking-[0.5em] w-full max-xs outline-none focus:ring-4 focus:ring-red-600/20"
+                            onKeyDown=${e => { if(e.key==='Enter' && e.target.value==='MusizFRL5643') { setIsAppLocked(false); setCookie('app_unlocked','true',30); }}}
+                        />
+                    </div>
+                `;
+            }
+
+            const filteredTracks = tracks.filter(t => 
+                t.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                t.artist.toLowerCase().includes(searchQuery.toLowerCase())
+            );
+
+            return html`
+                <div className="flex h-screen w-full bg-black text-white overflow-hidden">
+                    <aside className="hidden lg:flex flex-col w-[260px] bg-zinc-900/40 border-r border-white/5 pt-12 px-6 gap-8">
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="w-8 h-8 bg-[#fa2d48] rounded-lg flex items-center justify-center"><${Headphones} className="w-5 h-5" /></div>
+                            <span className="font-black text-2xl tracking-tighter">Music</span>
+                        </div>
+                        <${SidebarItem} icon=${Compass} label="Listen Now" active=${view==='library'} onClick=${()=>setView('library')} />
+                        <${SidebarItem} icon=${Search} label="Search" active=${view==='search'} onClick=${()=>setView('search')} />
+                        <${SidebarItem} icon=${Library} label="Library" active=${view==='lib'} onClick=${()=>setView('lib')} />
+                        <${SidebarItem} icon=${Settings} label="Settings" onClick=${()=>setView('settings')} />
+                    </aside>
+
+                    <main className="flex-1 flex flex-col relative overflow-hidden">
+                        <header className="px-8 pt-12 pb-6 sticky top-0 bg-black/80 backdrop-blur-2xl z-20 flex justify-between items-end">
+                            <h1 className="text-4xl font-black tracking-tight">
+                                ${view==='library'?'Listen Now':view==='search'?'Search':view==='settings'?'Settings':'Library'}
+                            </h1>
+                            ${isAuthorized && html`
+                                <label className="cursor-pointer p-3 bg-zinc-900/60 rounded-full active-scale">
+                                    <${Upload} className="w-5 h-5 text-[#fa2d48]" />
+                                    <input type="file" multiple className="hidden" onChange=${handleUpload} />
+                                </label>
+                            `}
+                        </header>
+
+                        <div className="flex-1 overflow-y-auto px-8 pb-40 no-scrollbar">
+                            ${view === 'search' && html`
+                                <div className="mb-10 relative">
+                                    <${Search} className="absolute left-6 top-1/2 -translate-y-1/2 w-6 h-6 text-zinc-500" />
+                                    <input 
+                                        type="text" placeholder="Artists, Songs, Lyrics" 
+                                        className="w-full bg-zinc-800/40 rounded-2xl py-6 pl-16 pr-6 text-xl outline-none"
+                                        value=${searchQuery} onChange=${e => setSearchQuery(e.target.value)}
+                                    />
+                                </div>
+                            `}
+
+                            ${isLoading ? html`<div className="flex justify-center py-20"><${Loader2} className="animate-spin text-[#fa2d48] w-12 h-12" /></div>` : html`
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                                    ${filteredTracks.map(t => html`
+                                        <div key=${t.id} className="group cursor-pointer" onClick=${()=>playTrack(t)}>
+                                            <div className="relative aspect-square rounded-2xl overflow-hidden bg-zinc-900 mb-3">
+                                                <img src=${t.coverUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+                                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                                    <${Play} className="w-10 h-10 fill-white" />
+                                                </div>
+                                            </div>
+                                            <p className="font-bold text-sm truncate">${t.title}</p>
+                                            <p className="text-xs text-zinc-500 truncate">${t.artist}</p>
+                                        </div>
+                                    `)}
+                                </div>
+                            `}
+
+                            ${view === 'settings' && html`
+                                <div className="max-w-2xl space-y-8 mt-10">
+                                    <div className="bg-zinc-900/50 p-6 rounded-3xl flex items-center justify-between">
+                                        <div><h3 className="font-bold">Developer Mode</h3><p className="text-sm text-zinc-500">Enable library management tools</p></div>
+                                        <button 
+                                            onClick=${() => {
+                                                if(!isAuthorized) {
+                                                    const p = prompt("Enter developer password:");
+                                                    if(p === 'admin123') setIsAuthorized(true);
+                                                } else setIsAuthorized(false);
+                                            }}
+                                            className=${`w-12 h-7 rounded-full transition-all relative ${isAuthorized ? 'bg-red-500':'bg-zinc-700'}`}
+                                        >
+                                            <div className=${`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-all ${isAuthorized?'translate-x-5':''}`} />
+                                        </button>
+                                    </div>
+                                    <button onClick=${() => setIsEqOpen(true)} className="w-full bg-zinc-900/50 p-6 rounded-3xl flex items-center justify-between hover:bg-zinc-800">
+                                        <span className="font-bold">Equalizer</span>
+                                        <${ChevronRight} />
+                                    </button>
+                                </div>
+                            `}
+                        </div>
+
+                        ${currentTrack && !fullScreenPlayer && html`
+                            <div onClick=${()=>setFullScreenPlayer(true)} className="absolute bottom-6 left-8 right-8 h-20 bg-zinc-900/80 backdrop-blur-3xl rounded-2xl border border-white/10 flex items-center px-4 gap-4 z-50 shadow-2xl active-scale cursor-pointer group">
+                                <img src=${currentTrack.coverUrl} className="w-14 h-14 rounded-xl object-cover shadow-2xl group-hover:scale-105" />
+                                <div className="flex-1 min-w-0"><p className="font-bold truncate text-sm">${currentTrack.title}</p><p className="text-xs text-zinc-400 truncate">${currentTrack.artist}</p></div>
+                                <div className="flex items-center gap-2">
+                                    <button onClick=${e=>{e.stopPropagation(); togglePlayPause();}} className="p-3 bg-white/5 rounded-full">${isPlaying?html`<${Pause} className="fill-current w-5 h-5"/>`:html`<${Play} className="fill-current w-5 h-5 ml-1"/>`}</button>
+                                    <button onClick=${e=>{e.stopPropagation(); playNext();}} className="p-3"><${SkipForward} className="fill-current w-6 h-6"/></button>
+                                </div>
+                            </div>
+                        `}
+
+                        ${uploadQueue.length > 0 && html`
+                            <div className="fixed bottom-32 right-8 z-[200] w-64 space-y-2">
+                                ${uploadQueue.map(u => html`
+                                    <div key=${u.id} className="bg-zinc-900/95 p-4 rounded-2xl border border-white/10 shadow-2xl">
+                                        <p className="text-xs font-bold truncate mb-2">${u.filename}</p>
+                                        <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+                                            <div className="h-full bg-red-500" style=${{width: `${u.progress}%`}} />
+                                        </div>
+                                    </div>
+                                `)}
+                            </div>
+                        `}
+                        
+                        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-black/70 backdrop-blur-3xl border-t border-white/5 flex items-center justify-around h-[84px] pb-6 px-4 z-40 safe-bottom">
+                            <${BottomNavItem} icon=${Compass} label="Listen Now" active=${view==='library'} onClick=${()=>setView('library')} />
+                            <${BottomNavItem} icon=${Library} label="Library" active=${view==='lib'} onClick=${()=>setView('lib')} />
+                            <${BottomNavItem} icon=${Search} label="Search" active=${view==='search'} onClick=${()=>setView('search')} />
+                        </nav>
+                    </main>
+
+                    ${fullScreenPlayer && currentTrack && html`
+                        <div className="fixed inset-0 z-[100] bg-[#1c1c1e] flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-500">
+                            <div className="absolute inset-0 z-0">
+                                <${Visualizer} analyser=${analyserNode} coverUrl=${currentTrack.coverUrl} className="w-full h-full opacity-60" style=${visualizerStyle} />
+                                <div className="absolute inset-0 bg-gradient-to-t from-[#1c1c1e] via-[#1c1c1e]/40 to-transparent" />
+                            </div>
+                            <header className="relative z-10 flex items-center justify-between px-6 pt-12">
+                                <button onClick=${()=>setFullScreenPlayer(false)} className="p-2 bg-white/10 rounded-full backdrop-blur-md"><${ChevronDown} className="w-6 h-6" /></button>
+                                <div className="flex gap-2">
+                                    <button onClick=${()=>setIsEqOpen(true)} className="p-2 bg-white/10 rounded-full backdrop-blur-md"><${Sliders} className="w-5 h-5" /></button>
+                                    <button onClick=${()=>setVisualizerStyle(visualizerStyle==='matrix'?'normal':'matrix')} className="p-2 bg-white/10 rounded-full backdrop-blur-md"><${Palette} className="w-5 h-5" /></button>
+                                </div>
+                            </header>
+                            <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-10 gap-10">
+                                <img src=${currentTrack.coverUrl} className="w-[min(80vw,380px)] aspect-square rounded-[32px] shadow-2xl border border-white/10 object-cover" />
+                                <div className="w-full max-w-lg text-center"><h2 className="text-3xl font-black">${currentTrack.title}</h2><p className="text-xl text-zinc-400 font-medium">${currentTrack.artist}</p></div>
+                                <div className="w-full max-w-lg space-y-4">
+                                    <input type="range" min="0" max=${duration} value=${currentTime} onChange=${e=>{mainAudio.currentTime=e.target.value; setCurrentTime(e.target.value);}} className="w-full h-1 bg-white/20 rounded-full accent-white" />
+                                    <div className="flex justify-between text-xs font-bold text-zinc-500"><span>${formatTime(currentTime)}</span><span>-${formatTime(duration-currentTime)}</span></div>
+                                </div>
+                                <div className="flex items-center gap-12">
+                                    <button onClick=${playPrev}><${SkipBack} className="w-10 h-10 fill-current" /></button>
+                                    <button onClick=${togglePlayPause} className="w-24 h-24 bg-white rounded-full text-black flex items-center justify-center shadow-2xl">
+                                        ${isPlaying?html`<${Pause} className="w-12 h-12 fill-current"/>`:html`<${Play} className="w-12 h-12 fill-current ml-2"/>`}
+                                    </button>
+                                    <button onClick=${playNext}><${SkipForward} className="w-10 h-10 fill-current" /></button>
+                                </div>
+                                <div className="w-full max-w-xs flex items-center gap-4 opacity-60"><${Volume2} className="w-5 h-5"/><input type="range" min="0" max="1" step="0.01" value=${volume} onChange=${e=>{mainAudio.volume=e.target.value; setVolume(e.target.value);}} className="w-full accent-white"/></div>
+                            </div>
+                            <footer className="relative z-10 h-32 flex items-center justify-center gap-12 text-zinc-500">
+                                <button className="flex flex-col items-center gap-1"><${Mic} className="w-6 h-6"/><span className="text-[10px] font-black uppercase">Lyrics</span></button>
+                                <button className="flex flex-col items-center gap-1"><${Signal} className="w-6 h-6"/><span className="text-[10px] font-black uppercase">AirPlay</span></button>
+                                <button className="flex flex-col items-center gap-1"><${List} className="w-6 h-6"/><span className="text-[10px] font-black uppercase">Queue</span></button>
+                            </footer>
+                            ${isEqOpen && html`<${Equalizer} settings=${eqSettings} onChange=${setEqSettings} onClose=${()=>setIsEqOpen(false)} />`}
+                        </div>
+                    `}
+                </div>
+            `;
+        }
+
+        function SidebarItem({ icon: Icon, label, active, onClick }) {
+            return html`
+                <button onClick=${onClick} className=${`w-full flex items-center gap-4 px-3 py-2.5 rounded-xl transition-all ${active ? 'bg-[#fa2d48]/10 text-[#fa2d48]' : 'text-zinc-500 hover:text-white hover:bg-white/5'}`}>
+                    <${Icon} className="w-6 h-6" /><span className="font-bold text-sm">${label}</span>
+                </button>
+            `;
+        }
+
+        function BottomNavItem({ icon: Icon, label, active, onClick }) {
+            return html`
+                <button onClick=${onClick} className="flex flex-col items-center gap-1.5 flex-1">
+                    <${Icon} className=${`w-7 h-7 ${active ? 'text-[#fa2d48]' : 'text-zinc-500'}`} /><span className=${`text-[10px] font-bold ${active ? 'text-[#fa2d48]' : 'text-zinc-500'}`}>${label}</span>
+                </button>
+            `;
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(html`<${App} />`);
+    </script>
+</body>
+</html>

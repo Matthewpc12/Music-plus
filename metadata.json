@@ -1,0 +1,7 @@
+{
+  "name": "Aplelictic music",
+  "description": "A glassmorphic music player integrating custom remote cloud storage and a 3-band equalizer.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
