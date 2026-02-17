@@ -1,23 +1,13 @@
-import path from 'path';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig(({ mode }) => {
-    const env = loadEnv(mode, '.', '');
-    return {
-      server: {
-        port: 3000,
-        host: '0.0.0.0',
-      },
-      plugins: [react()],
-      define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-      },
-      resolve: {
-        alias: {
-          '@': path.resolve(__dirname, '.'),
-        }
-      }
-    };
+export default defineConfig({
+  plugins: [react()],
+  build: {
+    minify: false,      // Prevents the "watering down" of your code
+    cssMinify: false,   // Keeps your CSS exactly as it looks in preview
+    treeshake: false,   // Forces Vite to keep the games and secret keywords
+    assetsDir: 'assets', // Keeps your folder structure organized
+  },
+  base: './',           // Fixes broken links to your local MP3 server
 });
