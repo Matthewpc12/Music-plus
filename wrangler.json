@@ -1,6 +1,6 @@
 // wrangler.jsonc
 {
-  "name": "apple-music-clone",
+  "name": "music2plus",
   "compatibility_date": "2026-02-17",
   "assets": {
     "directory": "./dist"
